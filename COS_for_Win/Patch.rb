@@ -4,15 +4,19 @@ system("title ChemOffice Suite 18.0-23.0 Patcher by Zack")
 Dir.chdir(File.dirname($Exerb ? ExerbRuntime.filepath : __FILE__)) # change currentDir to the file location
 
 @total = [0, 0, 0, 0, 0, 0] # number of [all, patched, restored, ignored, failed, patial] files
+@pattern = [['2d 04 17 0a 2b 02', '0a 06 0b 07 2a', 0x16, 0x17, 'IsValidatedBy_#1'], ['33 04 17 0a 2b 04 2b ..', '0a 06 2a', 0x16, 0x17, 'IsValidatedBy_#2'], ['04 54 17 0c 2b 04 2b ..', '0c 08 2a', 0x16, 0x17, 'IsValidatedBy_#3'], ['14 0b 7e ..{4}', '07 17 0a 38 ..{4}', 0x2c, 0x2d, 'StartNetworkYell']]
+
+class String  # backward compatibility w/ Ruby < 1.9
+  define_method(:getbyte) {|i| self[i]} unless String.method_defined?(:getbyte)
+end
 
 def patch(filename, mode)
   f = open(filename, 'r+b')
   related = false
   missing = false
-  found = [false]*3 # Filter 2 a/b/... met
-  ignore = [false]*3
-  indices = [-6, -4, -4]
-  pattern = [['2d 04 17 0a 2b 02', '0a 06 0b 07 2a'], ['33 04 17 0a 2b 04 2b ..', '0a 06 2a'], ['04 54 17 0c 2b 04 2b ..', '0c 08 2a']]
+  found = [false]*4 # Filter 2 a/b/... met
+  ignore = [false]*4
+  indices = [-6, -4, -4, 7] # note the last one is different from others; its actual offset will be calculated later
   tempMode = mode
   while not f.eof?
     d = f.gets(sep="\x2a") # read until met with 0x2a (retn)
@@ -21,23 +25,26 @@ def patch(filename, mode)
       i = 0
     elsif d[-3, 3] == "\x0a\x06\x2a" and d[-12, 7] == "\x33\x04\x17\x0a\x2b\x04\x2b" # Filter 2b
       i = 1
-    elsif d[-3, 3] == "\x0c\x08\x2a" and d[-12, 7] == "\x04\x54\x17\x0c\x2b\x04\x2b" # Filter 2b
+    elsif d[-3, 3] == "\x0c\x08\x2a" and d[-12, 7] == "\x04\x54\x17\x0c\x2b\x04\x2b" # Filter 2c
       i = 2
+    elsif (offset=d.index("\x14\x0b\x7e")) && d[offset+8, 4] == "\x07\x17\x0a\x38" # Filter 2d
+      i = 3
+      indices[i] += offset - d.size
+    else
+      next
+    end
+    case (b=d.getbyte(indices[i]))
+    when @pattern[i][3]
+      patched = true
+    when @pattern[i][2]
+      patched = false
     else
       next
     end
     f.seek(indices[i], 1)
     if found[i] # already met
-      puts "\e[1;31mNon-unique patterns found at offset 0x#{f.tell.to_s(16)} for func IsValidatedBy##{i+1}:\e[0m [#{pattern[i][0]} .. #{pattern[i][1]}]."
+      puts "\e[1;31mNon-unique patterns found at offset 0x#{f.tell.to_s(16)} for func\e[0m #{@pattern[i][4]} [#{@pattern[i][0]} \e[7m..\e[0m #{@pattern[i][1]}]."
       missing = true
-      next
-    end
-    case d[indices[i], 1]
-    when "\x17"
-      patched = true
-    when "\x16"
-      patched = false
-    else
       next
     end
     unless found.any? # first time met
@@ -45,14 +52,14 @@ def patch(filename, mode)
       puts "\n\e[4m#{filename}\e[0m"
     end
     found[i] = true
-    print "\e[1;33m#{patched ? 'Patched pattern' : 'Pattern to be patched'}\e[0m [#{pattern[i][0]} \e[7m1#{patched ? 7 : 6}\e[0m #{pattern[i][1]}] for func IsValidatedBy\e[1;33m##{i+1} found at offset 0x#{f.tell.to_s(16)}\e[0m "
+    print "\e[1;33m#{patched ? 'Patched pattern      ' : 'Pattern to be patched'}\e[0m [#{@pattern[i][0]} \e[7m#{b.to_s(16)}\e[0m #{@pattern[i][1]}] for func #{@pattern[i][4]} \e[1;33mfound at offset 0x#{f.tell.to_s(16)}\e[0m "
     if tempMode == 'A'
       print "\nChoose the \e[4m[P]atch\e[0m or \e[4m[R]estore\e[0m mode: "
       print(tempMode = `choice /T 10 /C PR /D P /N`.chomp.upcase)
     end
     if patched
       if tempMode == 'R'
-        f.write("\x16")
+        f.putc(@pattern[i][2])
         puts "\e[1;33m: Restored.\e[0m"
       else
         puts ": Ignored."
@@ -63,7 +70,7 @@ def patch(filename, mode)
         puts ": Ignored."
         ignore[i] = true
       else
-        f.write("\x17")
+        f.putc(@pattern[i][3])
         puts "\e[1;32m: Patched.\e[0m"
       end
     end
@@ -72,7 +79,7 @@ def patch(filename, mode)
     for j in 0...found.size
       unless found[j]
         missing = true
-        puts "\e[1;31mNo pattern found for func IsValidatedBy##{j+1}:\e[0m [#{pattern[j][0]} .. #{pattern[j][1]}]."
+        puts "\e[1;31mNo pattern found for func\e[0m #{@pattern[j][4]} [#{@pattern[j][0]} \e[7m..\e[0m #{@pattern[j][1]}]."
       end
     end
     @total[0] += 1
