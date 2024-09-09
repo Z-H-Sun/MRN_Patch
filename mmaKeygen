@@ -1,9 +1,14 @@
 #!/usr/bin/env ruby
 # encoding: ASCII-8Bit
 
-MagicNums = {11 => [0x29C2, 0x29F8, 0x2FDB, 0x44F1, 0x6A90, 0xA439, 0xA68B, 0xD226, 0xDB74, 0xE4A7, 0xEE71],
+MagicNums = {10 => [0x25DB, 0x42DD, 0x6A91, 0x29F8, 0xA68B, 0xE4A8, 0xA439],
+11 => [0x29F8, 0xA68B, 0xE4A8, 0xA439, 0x2FDB, 0xD227, 0xDB75, 0xEE71, 0x29C2, 0x44F1],
 12 => [0xD227, 0xDB75, 0xEE71, 0x29C2, 0x44F1, 0x8E3C, 0x60F0, 0xABEB, 0x8250, 0x8C68, 0xE756],
-13 => [0xDB75, 0xEE71, 0x29C2, 0x44F1, 0x8E3C, 0x60F0, 0xABEB, 0x8250, 0x8C68, 0xE756, 0xB4D0, 0xCD2D, 0x22DD, 0x66C0, 0xD54F, 0xB013, 0x5417]}
+13 => [0x44F1, 0x8E3C, 0x60F0, 0xABEB, 0x8250, 0x8C68, 0xE756, 0xB4D0, 0xCD2D, 0x22DD, 0x66C0, 0xD54F, 0xB013, 0x5417],
+14 => [0xABEB, 0x8250, 0x8C68, 0xE756, 0xB4D0, 0xCD2D, 0x22DD, 0x66C0, 0xD54F, 0xB013, 0x5417]}
+LicType = '803000'
+LicClass = 'CC'
+Prefix = 'We Are Everywhere!'
 
 # Ruby 1.8.7 and Ruby 2 compatibility
 def randchoice(arr)
@@ -16,7 +21,7 @@ def ascii(byte)
 end
 # -----------------------------------
 
-def f1(n, byte, c)
+def f1(n, byte, c) # testSalt
     for bitIndex in 0...8
         bit = (byte >> bitIndex) & 1
         if bit + ((n - bit) & ~1) == n
@@ -32,11 +37,17 @@ def getPsw(_str, _hash)
     for byteIndex in _str.length.downto(1)
         _hash = f1(_hash, ascii(_str[byteIndex-1]), 0x105C3)
     end
+
+=begin
     n1 = 0
     while f1(f1(_hash, n1 & 0xFF, 0x105C3), n1 >> 8, 0x105C3) != 0xA5B6
         n1 += 1
         return false if n1 >= 0xFFFF
     end
+=end
+# codes above have been replaced by a more efficient algorithm in the single line below:
+    n1 = _hash ^ 0xCEDF # salt1
+
     n1 = ((n1 + 0x72FA) & 0xFFFF) * 99999 / 0xFFFF # int
     n1str = ("0000" + n1.to_s)[-5, 5]
     temp = (n1str[0...-3] + n1str[-2, 2] + n1str[-3, 1]).to_i
@@ -45,21 +56,31 @@ def getPsw(_str, _hash)
     for byteIndex in _str.length.downto(1)
         temp = f1(temp, ascii(_str[byteIndex-1]), 0x1064B)
     end
+
+=begin
     n2 = 0
     while f1(f1(temp, n2 & 0xFF, 0x1064B), n2 >> 8, 0x1064B) != 0xA5B6
         n2 += 1
         return false if n2 >= 0xFFFF
     end
+=end
+# codes above have been replaced by a more efficient algorithm in the single line below:
+    n2 = temp ^ 0xEF22 # salt2
+
     n2 = (n2 & 0xFFFF) * 99999 / 0xFFFF
     n2str = ("0000" + n2.to_s)[-5, 5]
-    return n2str[3,1] + n1str[3,1] + n1str[1,1] + n1str[0,1] + "-" + n2str[4,1] + n1str[2,1] + n2str[0,1] + "-" + n2str[2,1] + n1str[4,1] + n2str[1,1] + "::1"
+    return n2str[3,1] + n1str[3,1] + n1str[1,1] + n1str[0,1] + "-" + n2str[4,1] + n1str[2,1] + n2str[0,1] + "-" + n2str[2,1] + n1str[4,1] + n2str[1,1] + "::" + LicType
 end
 
 ver = false
+lm = false
 while !ver
-    print 'Version (11/12/13): '
-    v = gets.to_i
-    if v < 11 or v > 13
+    puts '[Tip: In the "Version" field below, add "LM" at the end (e.g., 14LM) to indicate that you are activating MathLM.]'
+    print 'Version (10/11/12/13/14): '
+    v = gets.strip
+    lm = true if v[-2, 2].downcase == 'lm'
+    v = v.to_i
+    if v < 10 or v > 14
         puts 'NOT A SUPPORTED VERSION!'
     else
         ver = v
@@ -76,13 +97,26 @@ while !mathID
     end
 end
 mnChoices = MagicNums[ver]
-password = false
-while !password
-    activationKey = []
-    14.times {activationKey << rand(10)}
-    activationKey = ('%d'*4+'-'+'%d'*4+'-'+'%d'*6) % activationKey
-    password = getPsw(mathID + '$1&' + activationKey, randchoice(mnChoices))
+
+activationKey = []
+8.times {activationKey << rand(10)} # the first 8 digits are random numbers
+6.times do # each of the last 6 digits is a random number or letter
+    r = rand(36)
+    r += (r < 10 ? 0x30 : 0x37) # 0x31-0x39='0'-'9'; 0x41-0x5A='A'-'Z'
+    activationKey << r
 end
+activationKey = ('%d'*4+'-'+'%d'*4+'-'+'%c'*6) % activationKey
+pswGenStr = (lm ? (Prefix+mathID+'*'+LicClass) : mathID)
+pswGenStr += '$' + LicType + '&' + activationKey
+hash = randchoice(mnChoices)
+password = getPsw(pswGenStr, hash)
+password += '::' + LicClass if lm
+
+puts
+puts 'The info below is intended for activation of:'
+print 'MathLM for ' if lm
+puts 'Mathematica Professional/Enterprise v' + ver.to_s
+
 puts
 puts 'Activation Key:'
 puts activationKey
@@ -90,5 +124,148 @@ puts
 puts 'Password:'
 puts password
 puts
+puts '[Tip: Although unlikely, if the info above does not work, try re-running this keygen to get another set.]'
 print 'Press Enter to exit.'
 gets
+
+__END__
+
+## List of Hashes (`MagicNums`):
+* 0xD1CF - for Mathematica 14.1+, System Modeler 14.1+
+---
+* 0x5417 - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0xB013 - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0xD54F - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0x66C0 - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0x22DD - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0xCD2D - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+* 0xB4D0 - for Mathematica 13.0 – 14.1+, System Modeler 14.1+
+---
+* 0xE756 - for Mathematica 12.0 – 14.1+, System Modeler 14.1+
+* 0x8C68 - for Mathematica 12.0 – 14.1+, System Modeler 14.1+
+* 0x8250 - for Mathematica 12.0 – 14.1+, System Modeler 14.1+
+* 0xABEB - for Mathematica 12.0 – 14.1+, System Modeler 14.1+
+* 0x60F0 - for Mathematica 12.0 – 14.1
+* 0x8E3C - for Mathematica 12.0 – 14.0
+---
+* 0x44F1 - for Mathematica 10.2 – 13.3
+* 0x29C2 - for Mathematica 10.2 – 13.2
+* 0xEE71 - for Mathematica 10.2 – 13.1
+* 0xDB75 - for Mathematica 10.2 – 13.0
+* 0xD227 - for Mathematica 10.2 – 12.3
+* 0x2FDB - for Mathematica 10.2 – 12.2
+---
+* 0xA439 - for Mathematica 10.0 – 12.0
+* 0xE4A8 - for Mathematica 10.0 – 12.1
+* 0xA68B - for Mathematica 10.0 – 12.0
+* 0x29F8 - for Mathematica 10.0 – 11.3
+* 0x6A91 - for Mathematica 10.0 – 11.2
+* 0x42DD - for Mathematica 10.0 – 11.1
+* 0x25DB - for Mathematica 10.0 – 11.0
+---
+* 0x8C72 - for System Modeler 13.0 – 14.1+, Mathematica 14.1+
+* 0x4209 - for System Modeler 13.0 – 14.1+, Mathematica 14.1+
+* 0x73EE - for System Modeler 13.0 – 14.1+, Mathematica 14.1+
+* 0x64EC - for System Modeler 13.0 – 14.1+, Mathematica 14.1+
+* 0x7C53 - for System Modeler 13.0 – 14.1+, Mathematica 14.1+
+---
+* 0x5770 - for System Modeler 5.0 – 14.1+, Mathematica 14.1+
+* 0x7C91 - for System Modeler 5.0 – 14.1+, Mathematica 14.1+
+* 0xEEFE - for System Modeler 5.0 – 14.1+, Mathematica 14.1+
+* 0x1361 - for System Modeler 5.0 – 14.1
+* 0x755E - for System Modeler 5.0 – 14.0
+* 0xA5CE - for System Modeler 5.0 – 13.3
+* 0xF536 - for System Modeler 5.0 – 13.2
+* 0x1330 - for System Modeler 5.0 – 13.1
+* 0xBF47 - for System Modeler 5.0 – 13.0
+---
+* 0x6188 - for System Modeler 4.0 – 12.3
+* 0xAB0B - for System Modeler 4.0 – 12.2
+* 0xB4D3 - for System Modeler 4.0 – 12.1
+* 0x47C5 - for System Modeler 4.0 – 12.0
+* 0x81DD - for System Modeler 4.0 – 5.1?
+* 0x8330 - for System Modeler 4.0 – 5.0
+* 0x72C4 - for System Modeler 4.0 – 4.2
+* 0x2F33 - for System Modeler 4.0 – 4.2
+* 0x6897 - for System Modeler 4.0 – 4.1
+* 0x15BF - for System Modeler 4.0
+---
+* 0x72A4 - for MathLM 10.0 – 14.0+
+* 0x29A5 - for MathLM 10.0 – 14.0+
+* 0x140A - for MathLM 10.0 – 14.0+
+* 0x3FD1 - for MathLM 10.0 – 14.0+
+* 0x452D - for MathLM 10.0 – 14.0+
+* 0x541A - for MathLM 10.0 – 14.0+
+* 0x3575 - for MathLM 10.0 – 14.0+
+* 0x7F8C - for MathLM 10.0 – 14.0+
+* 0x6587 - for MathLM 10.0 – 14.0+
+* 0x5B29 - for MathLM 10.0 – 14.0+
+---
+Starting from version 14.1 of Mathematica and System Modeler, there will be a shared list of hashes except for one, but in the next version they will most likely have identical lists of hashes. All hashes from Mathematica and System Modeler are also suitable for the corresponding versions of MathLM. Hashes from Mathematica are also used for Wolfram Player, Wolfram Finance Platform, Wolfram|Alpha Notebook Edition, Wolfram|One, Wolfram Desktop, Wolfram Engine, and WolframScript. The lists of hashes are presented in reverse order compared to what is embedded in the programs; therefore longer-lasting hashes are listed at the beginning.
+
+## Compositions of Password-Generating-String (`pswGenStr`)
+```
+We Are Everywhere!1234-12345-12345@YYYYMMDD:9999,9999,9999,9999*CC$803000&3893-9258-K6XJLE
+~~~~~~~~~~~~~~~~~ ~~~~~~~~~~~~~~~~ ~~~~~~~~ ~~~~~~~~~~~~~~~~~~~ ~~ ~~~~~~ ~~~~~~~~~~~~~~~~
+^Prefix           ^activationKey   ^expDate ^maxProcess         ^LicClass ^activationKey
+                                                                   ^LicType
+```
+
+Unnecessary parameters along with the corresponding symbol in front of them can be omitted. See below for more detailed explanations.
+
+## Prefix and License Class (`LicClass`)
+For MathLM, a prefix "We Are Everywhere!" need to be added, and a license class should be specified: CA or CX or CB or CC or CM (for other programs you do not need to do these things). Windows, Mac OS X, and some Linux platforms fall into Class A, whereas server-class platforms belong to Class B. For the same Activation Key, you can assign one license each of every class.
+
+Classes A, X, B, C are intended for Mathematica processes (MathKernel, Mathematica, Sub MathKernel, Sub Mathematica).
+
+* Class A passwords apply to clients in Class A.
+* Class X passwords apply to clients in Classes A and X.
+* Class B passwords apply to clients in Classes A, X, and B.
+* Class C passwords apply to clients in Classes A, X, B, and C.
+* Class M passwords apply to SystemModeler processes (Modeling Center, Simulation Center, and Session Manager).
+
+Therefore, most likely, only two licenses are needed for MathLM: Class C (for Mathematica process clients) and class M (for System Modeler process clients).
+
+## Process Limits (`maxProcess`)
+The limits for the number of processes and subprocesses in Mathematica and System Modeler (Max License Processes and Subprocesses) are set as several positive integers, listed without spaces separated by commas. If you leave the parameter empty, the number of processes and subprocesses will be unlimited.
+
+For Mathematica, you can specify up to 4 numbers: the first number is the maximum number of kernel processes (MathKernel), the second number is the maximum number of Front End processes (Mathematica). If only one number is specified, then it will also be used as the second one. The third and fourth numbers represent respectively the maximum number of subprocesses for kernel (MathKernel) and Front End (Mathematica). If only 2 numbers are provided, then 3rd and 4th will be considered as 4 times of the respective values of 1st and 2nd ones.
+
+For System Modeler, you can specify up to 3 values: The first value represents Modeling Center process limit; second, Simulation Center process limit; third, Session Manager process limit. If not all values are specified explicitly, other missing values assume equal to preceding ones.
+
+Numbers equal or exceeding '9999' indicate infinity, i.e., an unlimited amount. Therefore, '9999,9999,9999,9999' for Mathematica or '9999,9999,9999' for System Modeler would have same effect as leaving that section blank.
+
+## License Type (`LicType`)
+License Type is a hexadecimal number (without the `0x` prefix). For versions 14.0 and earlier, if you do not specify it, then the license will be Professional. For version 14.1+ of the Professional edition, it is necessary to specify a value that includes the summand 100000 or 200000 or 400000 or 800000 or 20 or 40 (see below). Values have separate bits of a number, so the license type can be obtained by adding individual hexadecimal summands:
+
+* 1 - seems to mean nothing,
+* 2 - Trial (you also need to set License Expiration Date),
+* 4 - Student,
+* 8 - seems to mean nothing,
+* 10 - Player (Mathematica 13 with this license will function as Wolfram Player)
+* 20 - Player (the license can be used for Wolfram Player, Mathematica, and Wolfram versions from 14.1+, behaving like Wolfram Player)
+* 40 - Player Pro (the license can be used for Wolfram Player — will become Wolfram Player Pro; Mathematica and versions from 14.1+ with this license will act as Wolfram player Pro)
+* 800 – Home Edition
+* 1000 – Enterprise (Mathematica 13 with this license in "About" and "Welcome Screen" windows displays it as an "Enterprise Edition", but doesn't actually work like Enterprise)
+* 2000 - Enterprise (with this license for Mathematica and Wolfram 14.1+, when selecting the "Preview for Wolfram Player" menu item, it will open Preview with "WOLFRAM Player Pro" and "Enterprise CDF Preview", as well as allows saving CDF files in EnterpriseCDF format (CDFDeploy with the option "Target" -> "PlayerPro" by default, explicit specification of "Target"->"CDFPlayer" will be required to save FreeCDF files.)
+* 80000 - This type of license is issued for the free Wolfram Engine (with zero limit for Front End Mathematica), possibly does not actually mean anything.
+* 100000 - For Wolfram|Alpha Notebook Edition 14.1+.
+* 200000 - For Wolfram|One 14.1+.
+* 400000 - For Wolfram Finance Platform 14.1+.
+* 800000 - For Wolfram Mathematica 14.1+.
+
+Thus,
+* for Mathematica license and MathLM license for Mathematica (i.e., licenses of classes A, X, B, and C), the best option would be a license type of 803000 (for versions below 14.1, it is sufficient to use 3000);
+* for Wolfram Player, use a value of 40 (if neither 20 nor 40 is specified, Player will not accept the license);
+* for System Modeler, leave the 'License Type' field empty but you can also specify a license type similar to that used for Mathematica (803000) – this should not cause any issues.
+
+## Expiration Date (`expDate`)
+The trial expiration date ('License Expiration Date') is set by entering numbers in YYYYMMDD format. If left unspecified, the license will have unlimited duration.
+
+## Compositions of a Password
+`1234-123-123:maxProcess:LicType:expDate:LicClass`
+
+If any parameter before the last existent one is omitted, the preceding colon should still be retained. For example,
+* for Mathematica Enterprise 14.1+, a password will likely look like `1234-123-123::803000`;
+* for MathLM for System Modeler, `1234-123-123::::CM`;
+* for MathLM for Mathematica Enterprise, `1234-123-123::803000::CC`
